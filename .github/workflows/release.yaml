@@ -19,45 +19,58 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4.2.0
 
-      - name: Determine solution file
+      - name: Find and select solution file
         id: vars
         run: |
-          if [[ "${{ github.event.inputs.version }}" == "v6" ]]; then
-            echo "solution=craxsrat_v6.sln" >> $GITHUB_OUTPUT
-            echo "folder=v6" >> $GITHUB_OUTPUT
-            echo "zip=craxsrat-v6.zip" >> $GITHUB_OUTPUT
-          else
-            echo "solution=craxsrat_v7.sln" >> $GITHUB_OUTPUT
-            echo "folder=v7" >> $GITHUB_OUTPUT
-            echo "zip=craxsrat-v7.zip" >> $GITHUB_OUTPUT
+          # Try to find a solution matching the requested version
+          SOL=$(find . -type f -name "*${{ github.event.inputs.version }}*.sln" | head -n1)
+          # Fallback to any solution in top-level
+          if [ -z "$SOL" ]; then
+            SOL=$(find . -maxdepth 2 -type f -name '*.sln' | head -n1)
           fi
+          echo "Found solution: $SOL"
+          echo "solution=$SOL" >> $GITHUB_OUTPUT
+          DIR=$(dirname "$SOL")
+          NAME=$(basename "$DIR")
+          # If solution is in root, use 'root'
+          if [ "$DIR" = "." ]; then
+            NAME="root"
+          fi
+          echo "folder=$NAME" >> $GITHUB_OUTPUT
+          ZIP_NAME=$(basename "$SOL" .sln).zip
+          echo "zip=$ZIP_NAME" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4.3.1
         with:
           dotnet-version: '7.0.x'
-          include-prerelease: false
 
       - name: Restore dependencies
-        run: dotnet restore ${{ steps.vars.outputs.solution }}
+        run: dotnet restore "${{ steps.vars.outputs.solution }}"
 
       - name: Build solution
-        run: dotnet build ${{ steps.vars.outputs.solution }} --configuration ${{ env.CONFIGURATION }} --no-restore
+        run: dotnet build "${{ steps.vars.outputs.solution }}" --configuration ${{ env.CONFIGURATION }} --no-restore
 
       - name: Publish app
         run: |
-          dotnet publish ${{ steps.vars.outputs.solution }} \
+          dotnet publish "${{ steps.vars.outputs.solution }}" \
             --configuration ${{ env.CONFIGURATION }} \
             --output publish/${{ steps.vars.outputs.folder }} \
             --no-build
 
-      - name: Zip build
+      - name: Zip build output
         run: |
-          Compress-Archive -Path publish/${{ steps.vars.outputs.folder }}/* -DestinationPath ${{ steps.vars.outputs.zip }}
+          mkdir -p artifacts
+          Compress-Archive -Path publish/${{ steps.vars.outputs.folder }}/* -DestinationPath artifacts/${{ steps.vars.outputs.zip }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4.6.2
         with:
           name: ${{ github.event.inputs.version }}
-          path: ${{ steps.vars.outputs.zip }}
+          path: artifacts/${{ steps.vars.outputs.zip }}
+
+      - name: Print Logs URLs
+        run: |
+          echo "View logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Download logs: https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/logs"
